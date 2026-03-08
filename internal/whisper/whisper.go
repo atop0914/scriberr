@@ -1,3 +1,6 @@
+//go:build !no_cgo
+// +build !no_cgo
+
 package whisper
 
 // #cgo CFLAGS: -I/root/go/pkg/mod/github.com/ggerganov/whisper.cpp@v1.8.3/include -I/root/go/pkg/mod/github.com/ggerganov/whisper.cpp@v1.8.3/ggml/include

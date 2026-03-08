@@ -73,7 +73,7 @@ func (d *Downloader) Download(size ModelSize) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download failed with status: %s", resp.StatusCode)
+		return "", fmt.Errorf("download failed with status: %d", resp.StatusCode)
 	}
 
 	// Get total size

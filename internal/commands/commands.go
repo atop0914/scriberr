@@ -18,6 +18,8 @@ func All(log *logger.Logger, cfg *config.Config) []*cli.Command {
 	}
 	// Add model commands
 	cmds = append(cmds, ModelCommands(log, cfg)...)
+	// Add transcribe commands
+	cmds = append(cmds, TranscribeCommands(log, cfg)...)
 	return cmds
 }
 

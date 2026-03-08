@@ -227,3 +227,27 @@ func ValidateLanguage(lang string) *ValidationResult {
 
 	return result
 }
+
+// IsSupportedAudioFormat checks if the given extension is a supported audio format
+func IsSupportedAudioFormat(ext string) bool {
+	ext = strings.ToLower(ext)
+	formats := []string{".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma", ".opus"}
+	for _, f := range formats {
+		if ext == f {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateAudioFile validates a single audio file path
+func ValidateAudioFile(path string) error {
+	validator := NewAudioFileValidator()
+	result := validator.ValidatePath(path)
+	if result.HasErrors() {
+		for _, err := range result.Errors {
+			return fmt.Errorf("%s: %s", err.Field, err.Message)
+		}
+	}
+	return nil
+}

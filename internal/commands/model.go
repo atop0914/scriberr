@@ -16,9 +16,11 @@ func ModelCommands(log *logger.Logger, cfg *config.Config) []*cli.Command {
 	return []*cli.Command{
 		ListModelsCommand(log, cfg),
 		DownloadModelCommand(log, cfg),
+		DownloadAllModelsCommand(log, cfg),
 		DeleteModelCommand(log, cfg),
 		ClearCacheCommand(log, cfg),
 		ModelStatusCommand(log, cfg),
+		SelectModelCommand(log, cfg),
 	}
 }
 
@@ -271,6 +273,137 @@ func ModelStatusCommand(log *logger.Logger, cfg *config.Config) *cli.Command {
 				}
 				fmt.Printf("\nDefault Model (%s): %s\n", cfg.Model.Size, status)
 			}
+
+			return nil
+		},
+	}
+}
+
+// SelectModelCommand sets the default model in config
+func SelectModelCommand(log *logger.Logger, cfg *config.Config) *cli.Command {
+	return &cli.Command{
+		Name:        "select-model",
+		Aliases:     []string{"sm"},
+		Usage:       "Set the default model size",
+		Description: "Sets the default Whisper model size in the configuration file",
+		Category:    "Model",
+		ArgsUsage:   "<model-size>",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "config",
+				Usage: "Config file path",
+				Value: "config.yaml",
+			},
+		},
+		Action: func(cCtx *cli.Context) error {
+			sizeStr := cCtx.Args().First()
+			if sizeStr == "" {
+				return fmt.Errorf("model size required (tiny, base, small, medium, large, large-v2, large-v3)")
+			}
+
+			// Validate model size
+			if !model.IsValidModelSize(sizeStr) {
+				return fmt.Errorf("invalid model size: %s", sizeStr)
+			}
+
+			// Update config
+			cfg.Model.Size = sizeStr
+
+			// Save config
+			configPath := cCtx.String("config")
+			if err := cfg.Save(configPath); err != nil {
+				return fmt.Errorf("failed to save config: %w", err)
+			}
+
+			fmt.Printf("✓ Default model set to: %s\n", sizeStr)
+			fmt.Printf("  Config saved to: %s\n", configPath)
+
+			// Check if model is cached
+			if model.IsModelCached(model.ModelSize(sizeStr)) {
+				fmt.Printf("  Status: Cached\n")
+			} else {
+				fmt.Printf("  Status: Not cached (run 'scriberr download-model %s' to download)\n", sizeStr)
+			}
+
+			return nil
+		},
+	}
+}
+
+// DownloadAllModelsCommand downloads all available models
+func DownloadAllModelsCommand(log *logger.Logger, cfg *config.Config) *cli.Command {
+	return &cli.Command{
+		Name:        "download-all",
+		Aliases:     []string{"dla"},
+		Usage:       "Download all Whisper models",
+		Description: "Downloads and caches all available Whisper models",
+		Category:    "Model",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "force",
+				Aliases: []string{"f"},
+				Usage: "Force re-download even if cached",
+			},
+			&cli.BoolFlag{
+				Name:  "skip-existing",
+				Usage: "Skip models that are already cached",
+			},
+		},
+		Action: func(cCtx *cli.Context) error {
+			force := cCtx.Bool("force")
+			skipExisting := cCtx.Bool("skip-existing")
+
+			available := model.AvailableModels()
+			downloader := model.NewDownloader(log)
+
+			// Set up progress tracking
+			totalModels := len(available)
+			successCount := 0
+			failCount := 0
+
+			fmt.Printf("Downloading all models (%d total)...\n\n", totalModels)
+
+			for i, m := range available {
+				// Check if should skip
+				if skipExisting && !force && model.IsModelCached(m.Size) {
+					fmt.Printf("[%d/%d] Skipping %s (already cached)\n", i+1, totalModels, m.Size)
+					continue
+				}
+
+				// Check if already cached (unless force)
+				if !force && model.IsModelCached(m.Size) {
+					path, _ := model.ModelPath(m.Size)
+					fmt.Printf("[%d/%d] %s already cached at: %s\n", i+1, totalModels, m.Size, path)
+					successCount++
+					continue
+				}
+
+				fmt.Printf("[%d/%d] Downloading: %s (%s)...\n", i+1, totalModels, m.Size, m.FileSize)
+
+				// Download with progress
+				downloader.SetProgressCallback(func(downloaded, total int64) {
+					percent := float64(downloaded) / float64(total) * 100
+					fmt.Printf("\r  Progress: %.1f%% (%s / %s)",
+						percent,
+						formatSize(downloaded),
+						formatSize(total))
+				})
+
+				path, err := downloader.Download(m.Size)
+				if err != nil {
+					fmt.Printf("\n  ✗ Failed: %v\n", err)
+					failCount++
+					continue
+				}
+
+				fmt.Printf("\n  ✓ Downloaded: %s\n\n", path)
+				successCount++
+			}
+
+			fmt.Printf("\n=== Download Summary ===\n")
+			fmt.Printf("Total: %d\n", totalModels)
+			fmt.Printf("Succeeded: %d\n", successCount)
+			fmt.Printf("Failed: %d\n", failCount)
 
 			return nil
 		},

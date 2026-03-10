@@ -42,6 +42,10 @@ func TranscribeCommand(log *logger.Logger, cfg *config.Config) *cli.Command {
 				Name:  "output-dir",
 				Usage: "Treat output as directory (for batch processing)",
 			},
+			&cli.BoolFlag{
+				Name:  "force",
+				Usage: "Force overwrite existing output files",
+			},
 			
 			// Model flags
 			&cli.StringFlag{
@@ -115,33 +119,45 @@ func TranscribeCommands(log *logger.Logger, cfg *config.Config) []*cli.Command {
 
 // runTranscribe handles the actual transcription logic
 func runTranscribe(log *logger.Logger, cfg *config.Config, cCtx *cli.Context) error {
+	// Validate arguments early
+	if cCtx.Args().Len() == 0 && cCtx.String("pattern") == "" {
+		return fmt.Errorf("no audio files provided. Use --pattern for glob or provide audio files as arguments")
+	}
+	
 	// Parse output format
 	formatStr := cCtx.String("format")
 	outFormat := output.ParseFormat(formatStr)
 	
-	// Get model
+	// Validate model
 	modelSize := cCtx.String("model")
 	if !model.IsValidModelSize(modelSize) {
-		return fmt.Errorf("invalid model size: %s", modelSize)
+		return fmt.Errorf("invalid model size: %s. Valid options: tiny, base, small, medium, large, large-v2, large-v3", modelSize)
+	}
+	
+	// Validate language
+	langResult := validator.ValidateLanguage(cCtx.String("language"))
+	if langResult.HasErrors() {
+		for _, err := range langResult.Errors {
+			return fmt.Errorf("language validation error: %s", err.Message)
+		}
 	}
 	
 	// Check if model is cached
 	if !model.IsModelCached(model.ModelSize(modelSize)) {
 		fmt.Printf("Model '%s' not cached. Downloading...\n", modelSize)
 		downloader := model.NewDownloader(log)
-		path, err := downloader.Download(model.ModelSize(modelSize))
+		path, err := downloader.DownloadWithRetry(model.ModelSize(modelSize), cfg.Model.MaxRetries)
 		if err != nil {
 			return fmt.Errorf("failed to download model: %w", err)
 		}
 		fmt.Printf("Model downloaded to: %s\n", path)
 	}
 	
-	// Get language
+	// Get parameters
 	language := cCtx.String("language")
-	
-	// Get output path
 	outPath := cCtx.String("output")
 	outDir := cCtx.Bool("output-dir")
+	force := cCtx.Bool("force")
 	
 	// Handle batch processing
 	pattern := cCtx.String("pattern")
@@ -154,6 +170,9 @@ func runTranscribe(log *logger.Logger, cfg *config.Config, cCtx *cli.Context) er
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			return fmt.Errorf("invalid glob pattern: %w", err)
+		}
+		if len(matches) == 0 {
+			return fmt.Errorf("no files match pattern: %s", pattern)
 		}
 		inputFiles = matches
 	} else {
@@ -185,7 +204,13 @@ func runTranscribe(log *logger.Logger, cfg *config.Config, cCtx *cli.Context) er
 	inputFiles = filterAudioFiles(inputFiles)
 	
 	if len(inputFiles) == 0 {
-		return fmt.Errorf("no audio files provided")
+		return fmt.Errorf("no valid audio files found. Supported formats: mp3, wav, m4a, ogg, flac, aac, wma, opus")
+	}
+	
+	// Validate output path settings
+	if outPath != "" && len(inputFiles) > 1 && !outDir {
+		log.Warn("Multiple input files but output is not a directory. Using batch mode.")
+		outDir = true
 	}
 	
 	// Process files
@@ -194,10 +219,17 @@ func runTranscribe(log *logger.Logger, cfg *config.Config, cCtx *cli.Context) er
 	
 	// Handle single vs batch output
 	if len(inputFiles) == 1 && !outDir && outPath != "" {
-		// Single file with output path - process directly
+		// Single file with output path - check if we can overwrite
+		if !force {
+			if _, err := os.Stat(outPath); err == nil {
+				return fmt.Errorf("output file already exists: %s (use --force to overwrite)", outPath)
+			}
+		}
+		
+		// Process directly
 		err := transcribeSingleFile(log, inputFiles[0], outPath, outFormat, modelSize, language, cCtx, quiet, verbose)
 		if err != nil {
-			return fmt.Errorf("transcription failed: %w", err)
+			return fmt.Errorf("transcription failed for %s: %w", inputFiles[0], err)
 		}
 		if !quiet {
 			fmt.Printf("✓ Transcribed: %s -> %s\n", inputFiles[0], outPath)
@@ -227,6 +259,15 @@ func runTranscribe(log *logger.Logger, cfg *config.Config, cCtx *cli.Context) er
 			ext := output.GetFormatter(outFormat).Extension()
 			outputFile := filepath.Join(batchOutputDir, basename+ext)
 			
+			// Check for overwrite
+			if !force {
+				if _, err := os.Stat(outputFile); err == nil {
+					log.Warn("Skipping existing file (use --force to overwrite)", "file", outputFile)
+					failCount++
+					continue
+				}
+			}
+			
 			err := transcribeSingleFile(log, inputFile, outputFile, outFormat, modelSize, language, cCtx, quiet, verbose)
 			if err != nil {
 				log.Error("Transcription failed", "file", inputFile, "error", err)
@@ -242,6 +283,10 @@ func runTranscribe(log *logger.Logger, cfg *config.Config, cCtx *cli.Context) er
 		
 		if !quiet {
 			fmt.Printf("\nBatch complete: %d succeeded, %d failed\n", successCount, failCount)
+		}
+		
+		if failCount > 0 && successCount == 0 {
+			return fmt.Errorf("all transcriptions failed")
 		}
 	} else {
 		// Single file to stdout

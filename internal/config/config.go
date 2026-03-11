@@ -56,7 +56,7 @@ func Default() *Config {
 	return &Config{
 		App: AppConfig{
 			Name:        "scriberr",
-			Version:     "0.1.0",
+			Version:     "1.0.0",
 			Environment: "development",
 		},
 		Database: DatabaseConfig{

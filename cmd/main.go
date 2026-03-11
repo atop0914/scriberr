@@ -25,7 +25,7 @@ func main() {
 	app := &cli.App{
 		Name:                  "scriberr",
 		Usage:                 "A brief description of your application",
-		Version:               "0.1.0",
+		Version:               "1.0.0",
 		EnableBashCompletion: true,
 		Suggest:               true,
 		HideVersion:           false,

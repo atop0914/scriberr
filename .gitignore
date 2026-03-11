@@ -1,0 +1,31 @@
+# Binaries
+scriberr
+scriberr.exe
+*.exe
+
+# Go
+*.test
+coverage.txt
+
+# Model files (downloaded)
+models/
+*.bin
+*.ggml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Build output
+dist/
+build/

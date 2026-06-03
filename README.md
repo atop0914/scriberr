@@ -37,6 +37,7 @@ Download the latest release for your platform from the releases page.
 ```bash
 # Transcribe a single file
 ./scriberr transcribe audio.mp3
+[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://go.dev/)
 
 # Specify output format
 ./scriberr transcribe audio.mp3 --format json
